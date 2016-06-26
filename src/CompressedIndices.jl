@@ -3,9 +3,13 @@ module CompressedIndices
 import Base: length, size, getindex, start, next, done
 export Indices, length, size, getindex, start, next, done
 
+typealias AbstractIndices Union{Int, AbstractVector{Int}}
+
 type Indices <: AbstractVector{Int}
-    indices::Vector{Union{Int, AbstractVector{Int}}}
+    indices::Vector{AbstractIndices}
 end
+
+Indices(indices::AbstractIndices...) = Indices(AbstractIndices[i for i in indices])
 
 length(a::Indices) = sum(length, a.indices)
 size(a::Indices) = (length(a),)
