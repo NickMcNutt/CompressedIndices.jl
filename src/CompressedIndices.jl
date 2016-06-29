@@ -1,6 +1,6 @@
 module CompressedIndices
 
-import Base: length, size, getindex, start, next, done, push!, append!
+import Base: length, size, getindex, start, next, done, push!, append!, intersect, intersect!
 export Indices
 
 typealias AbstractIndices Union{Int, AbstractVector{Int}}
@@ -108,5 +108,27 @@ end
 
 # Optimize this:
 append!(a::Indices, ind::AbstractVector{Int}) = push!(a.indices, ind)
+
+remove_empty!(a::Vector{AbstractIndices}) = filter!(ind -> !isempty(ind), a)
+
+function intersect(a::Indices, b::AbstractIndices)
+    indices = AbstractIndices[intersect(ind, b) for ind in a.indices]
+    remove_empty!(indices)
+    Indices(indices)
+end
+
+function intersect!(a::Indices, b::AbstractIndices)
+    for (i, ind) in enumerate(a.indices)
+        c = intersect(ind, b)
+
+        if ind != c
+            a.indices[i] = c
+        end
+    end
+    
+    remove_empty!(a.indices)
+
+    return a
+end
 
 end
