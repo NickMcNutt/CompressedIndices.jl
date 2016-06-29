@@ -11,7 +11,7 @@ end
 
 Indices(indices::AbstractIndices...) = Indices(AbstractIndices[i for i in indices])
 
-length(a::Indices) = sum(length, a.indices)
+length(a::Indices) = length(a.indices) > 0 ? sum(length, a.indices) : 0
 size(a::Indices) = (length(a),)
 
 function getindex(a::Indices, index::Int)
@@ -98,7 +98,13 @@ function push!(b::UnitRange{Int}, a::Indices, index::Int)
     return a
 end
 
-push!(a::Indices, index::Int) = push!(last(a.indices), a, index)
+function push!(a::Indices, index::Int)
+    if length(a.indices) > 0
+        push!(last(a.indices), a, index)
+    else
+        push!(a.indices, index)
+    end
+end
 
 # Optimize this:
 append!(a::Indices, ind::AbstractVector{Int}) = push!(a.indices, ind)
