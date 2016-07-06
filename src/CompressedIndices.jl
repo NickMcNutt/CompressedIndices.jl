@@ -1,134 +1,187 @@
 module CompressedIndices
 
-import Base: length, size, getindex, start, next, done, push!, append!, intersect, intersect!
+import Base: eltype, length, endof, size, checkbounds, eachindex, getindex, start, next, done, push!, append!, intersect, intersect!, +, -
 export Indices
 
-typealias AbstractIndices Union{Int, AbstractVector{Int}}
+typealias AbstractIndices Union{Int, UnitRange{Int}, Vector{Int}}
 
 immutable Indices <: AbstractVector{Int}
-    indices::Vector{AbstractIndices}
+    vectors::Vector{Int}
+    ranges::Vector{Int}
+    length::Vector{Int}
+    isrange::BitVector
 end
 
-Indices(indices::AbstractIndices...) = Indices(AbstractIndices[i for i in indices])
+eltype(I::Indices) = Int
+length(I::Indices) = sum(I.length)
+endof(I::Indices) = length(I)
+size(I::Indices) = (length(I),)
+eachindex(I::Indices) = 1:length(I)
 
-length(a::Indices) = length(a.indices) > 0 ? sum(length, a.indices) : 0
-size(a::Indices) = (length(a),)
+start(I::Indices) = (1, 0, 0, 1)
+function next(I::Indices, state::NTuple{4, Int})
+    @inbounds l = state[1]
+    @inbounds vi = state[2]
+    @inbounds ri = state[3]
+    @inbounds li = state[4]
+    @inbounds isrange = I.isrange[li]
 
-function getindex(a::Indices, index::Int)
-    1 <= index <= length(a) || throw(BoundsError(a, index))
-    
-    n = 0
-    for indices in a.indices
-        l = length(indices)
-        n + l >= index && return indices[index - n]
-        n += l
-    end
-end
-
-start(a::Indices) = (0, 1, 1)
-
-function next(a::Indices, state)
-    n, i, index = state
-    item = a.indices[i][index - n]
-    
-    l = length(a.indices[i])
-    index += 1
-    
-    if index > n + l
-        n += l
-        i += 1
-    end
-    
-    return item, (n, i, index)
-end
-
-done(a::Indices, state) = state[2] > length(a.indices)
-
-function push!(b::Vector{Int}, a::Indices, index::Int)
-    c = index - 1
-    l = endof(b)
-    i = l
-    while b[i] == c
-        c -= 1
-        i -= 1
-        i == 0 && break
+    item = 0
+    if isrange
+        @inbounds item = I.ranges[ri + 1] + l - 1
+    else
+        @inbounds item = I.vectors[vi + l]
     end
 
-    if i == l
-        push!(b, index)
-    elseif i > 1
-        deleteat!(b, (i + 1):l)
-        push!(a.indices, (c + 1):index)
-    elseif i == 1
-        f = b[1]
-
-        pop!(a.indices)
-        if length(a.indices) > 0
-            push!(a, f)
+    l += 1
+    @inbounds l_li = I.length[li]
+    if l > l_li
+        if isrange
+            ri += 1
         else
-            push!(a.indices, f)
+            vi += l - 1
         end
 
-        append!(a, (c + 1):index)
-    else
-        a.indices[end] = (c + 1):index
+        l = 1
+        li += 1
     end
 
-    return a
+    return item, (l, vi, ri, li)
 end
 
-function push!(b::Int, a::Indices, index::Int)
-    if b == index - 1
-        a.indices[end] = b:index
-    else
-        a.indices[end] = Int[b, index]
+done(I::Indices, state::NTuple{4, Int}) = (@inbounds s = state[4] ; s > length(I.length))
+
+function push!(I::Indices, index::Int)
+    if length(I.length) == 0
+        push!(I.ranges, index)
+        push!(I.length, 1)
+        push!(I.isrange, true)
+
+        return I
     end
 
-    return a
-end
+    li = endof(I.length)
+    @inbounds isrange = I.isrange[li]
 
-function push!(b::UnitRange{Int}, a::Indices, index::Int)
-    l::Int = b[end]
-    if l == index - 1
-        a.indices[end] = b[1]:index
+    if isrange
+        @inbounds rs = I.ranges[end]
+        @inbounds rl = I.length[li]
+        if index == rs + rl
+            @inbounds I.length[li] += 1
+        else
+            push!(I.vectors, index)
+            push!(I.length, 1)
+            push!(I.isrange, false)
+        end
     else
-        push!(a.indices, index)
+        @inbounds vl = I.vectors[end]
+        if index == vl + 1
+            pop!(I.vectors)
+            @inbounds l_li = I.length[li]
+            if l_li > 1
+                @inbounds I.length[li] -= 1
+                push!(I.length, 2)
+                push!(I.isrange, true)
+            else
+                @inbounds I.length[li] += 1
+                @inbounds I.isrange[li] = true
+            end
+            push!(I.ranges, vl)
+        else
+            push!(I.vectors, index)
+            @inbounds I.length[li] += 1
+        end
     end
 
-    return a
+    return I
 end
 
-function push!(a::Indices, index::Int)
-    if length(a.indices) > 0
-        push!(last(a.indices), a, index)
-    else
-        push!(a.indices, index)
+function getindex(I::Indices, index::Int)
+    n = 0
+    ri = 0
+    vi = 0
+
+    for (i, l) in enumerate(I.length)
+        @inbounds isrange = I.isrange[i]
+        if n + l >= index
+            if isrange
+                return I.ranges[ri + 1] + (index - n - 1)
+            else
+                return I.vectors[vi + index - n]
+            end
+        end
+
+        n += l
+        if isrange
+            ri += 1
+        else
+            vi += l
+        end
     end
+
+    return 0
 end
 
-# Optimize this:
-append!(a::Indices, ind::AbstractVector{Int}) = push!(a.indices, ind)
-
-remove_empty!(a::Vector{AbstractIndices}) = filter!(ind -> !isempty(ind), a)
-
-function intersect(a::Indices, b::AbstractIndices)
-    indices = AbstractIndices[intersect(ind, b) for ind in a.indices]
-    remove_empty!(indices)
-    Indices(indices)
-end
-
-function intersect!(a::Indices, b::AbstractIndices)
-    for (i, ind) in enumerate(a.indices)
-        c = intersect(ind, b)
-
-        if ind != c
-            a.indices[i] = c
+@generated function Indices(ind::AbstractIndices...)
+    length(ind) == 0 && return :(Indices(Vector{Int}(), Vector{Int}(), Vector{Int}(), BitVector()))
+    num_ranges = count(x -> x == UnitRange{Int}, ind)
+    
+    isrange = BitVector([ind[1] == UnitRange{Int}])
+    
+    for i in 2:endof(ind)
+        b = ind[i] == UnitRange{Int}
+        if last(isrange) || b
+            push!(isrange, b)
         end
     end
     
-    remove_empty!(a.indices)
-
-    return a
+    ex = Expr[
+        :(vectors = Vector{Int}())
+        :(ranges = Vector{Int}($num_ranges))
+        :(len = Vector{Int}($(length(isrange))))
+        :(isrange = BitVector($isrange))
+    ]
+    
+    ri = 0
+    oi = 0
+    last_isrange = true
+    for (i, i_type) in enumerate(ind)
+        if i_type == UnitRange{Int}
+            ri += 1
+            push!(ex, :(ranges[$ri] = first(ind[$i])))
+            
+            oi += 1
+            push!(ex, :(len[$oi] = length(ind[$i])))
+            
+            last_isrange = true
+        elseif i_type == Int
+            if last_isrange
+                oi += 1
+                push!(ex, :(len[$oi] = 1))
+                last_isrange = false
+            else
+                push!(ex, :(len[$oi] += 1))
+            end
+            
+            push!(ex, :(push!(vectors, ind[$i])))
+        elseif i_type == Vector{Int}
+            if last_isrange
+                oi += 1
+                push!(ex, :(len[$oi] = length(ind[$i])))
+                last_isrange = false
+            else
+                push!(ex, :(len[$oi] += length(ind[$i])))
+            end
+            
+            push!(ex, :(append!(vectors, ind[$i])))
+        else
+            throw(ArgumentError("Invalid types in constructor Indices()"))
+        end
+    end
+    
+    push!(ex, :(Indices(vectors, ranges, len, isrange)))
+    
+    return Expr(:block, ex...)
 end
 
 end
