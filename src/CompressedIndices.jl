@@ -3,7 +3,7 @@ module CompressedIndices
 import Base: eltype, length, endof, size, checkbounds, eachindex, getindex, start, next, done, push!, append!, intersect, intersect!, +, -
 export Indices
 
-typealias AbstractIndices Union{Int, UnitRange{Int}, Vector{Int}}
+AbstractIndices = Union{Int, UnitRange{Int}, Vector{Int}}
 
 immutable Indices <: AbstractVector{Int}
     vectors::Vector{Int}
